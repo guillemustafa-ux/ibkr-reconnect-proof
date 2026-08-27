@@ -1,0 +1,20 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "ibkr-reconnect-proof"
+version = "0.1.0"
+description = "Chaos harness proving idempotent order handling and state resync against the IBKR TWS API"
+requires-python = ">=3.10"
+dependencies = ["ib_async>=1.0"]
+
+[project.optional-dependencies]
+dev = ["pytest>=8", "pytest-asyncio>=0.23"]
+
+[tool.setuptools.packages.find]
+include = ["ibkr_reconnect_proof*"]
+
+[tool.pytest.ini_options]
+asyncio_mode = "auto"
+log_cli = false
