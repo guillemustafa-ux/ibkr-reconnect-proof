@@ -138,7 +138,10 @@ runs recovery, prints the verdict, verifies exactly one order exists,
 reconciles, and cancels its own order — leaving the account flat.
 
 Real output of both drills, run 2026-08-27 against IBKR's paper
-infrastructure (IB Gateway 10.45 stable, paper account `DUT...`):
+infrastructure (IB Gateway 10.45 stable, paper account `DUT...`).
+Re-verified 2026-08-28 on TWS 10.50.1e over port 7497 — same verdicts,
+same single order at the broker, so the harness is not tied to either
+front end:
 
 ```text
 $ python scripts/live_drill.py --fault after
@@ -198,6 +201,15 @@ running the drill against the real thing:
   an order preset it emits notice 10349, which `ib_async` does not know as
   a warning: it mislabels the live trade as locally cancelled. Orders are
   sent with `tif="DAY"` so the notice never fires.
+* **TWS modals stall the drill; Gateway has none.** TWS ships a UI, and an
+  open dialog — the API order-precautions prompt, the after-hours notice —
+  holds up order processing while the drill runs. The same-id resend then
+  comes back as error 103 even with the realistic 5 second outage, which
+  looks identical to the instant-reconnect race above but has a different
+  cause. Dismiss every dialog, tick "don't show again", and enable the API
+  with *Read-Only API* off before arming the drill. The safety property
+  held in that run too: the rejection blocked the duplicate and
+  reconciliation stayed clean.
 
 The proxy also runs standalone if you want to point your own client
 through it:
