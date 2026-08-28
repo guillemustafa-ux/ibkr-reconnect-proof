@@ -83,9 +83,30 @@ async def main() -> None:
     print(f"[drill] connection lost; ledger state:"
           f" {ledger.get(ref).state} (fate unknown)")
 
+    # Let the outage last a few real seconds. Reconnecting within
+    # milliseconds of the cut hits a different (and nastier) gateway edge:
+    # the half-processed order of the dead session gets purged while its
+    # orderId stays consumed, so the resend is rejected with error 103.
+    # Even then no duplicate is ever created — but the scenario under
+    # proof here is a real outage, after which the gateway has settled.
+    print("[drill] outage in progress; waiting 5s before reconnecting...")
+    await asyncio.sleep(5)
     print("[drill] reconnecting DIRECTLY to the gateway...")
     trader.host, trader.port = host, port
-    await trader.connect(timeout=15)
+    # The real gateway keeps the dead session's clientId registered for a
+    # few seconds after the cut (error 326), unlike the fake broker which
+    # frees it instantly. Retry until the gateway releases the id.
+    for attempt in range(1, 7):
+        try:
+            await trader.connect(timeout=15)
+            break
+        except (TimeoutError, OSError) as exc:
+            trader.disconnect()
+            print(f"[drill] reconnect attempt {attempt} failed ({exc!r});"
+                  " gateway still holds the old session, retrying in 5s")
+            await asyncio.sleep(5)
+    else:
+        sys.exit("[drill] ABORT: gateway never released the clientId")
     report = await trader.recover({args.symbol: contract})
     print(f"[drill] recovery report: adopted={report.adopted}"
           f" resent={report.resent} filled={report.filled}"

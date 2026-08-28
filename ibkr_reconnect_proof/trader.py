@@ -88,8 +88,12 @@ class ResilientTrader:
         )
         log.info("reserved order_id=%s order_ref=%s (durable, pre-send)",
                  order_id, order_ref)
+        # tif must be explicit: when the gateway fills it from an order
+        # preset it emits notice 10349, which ib_async does not know as a
+        # warning and mislabels the live trade as Cancelled.
         order = LimitOrder(
-            action, quantity, price, orderId=order_id, orderRef=order_ref
+            action, quantity, price, orderId=order_id, orderRef=order_ref,
+            tif="DAY",
         )
         trade = self.ib.placeOrder(contract, order)
         self.ledger.mark_sent(order_ref)
@@ -138,7 +142,7 @@ class ResilientTrader:
                 contract = contract_by_symbol[order.symbol]
                 resend = LimitOrder(
                     order.action, order.quantity, order.limit_price,
-                    orderId=order.order_id, orderRef=ref,
+                    orderId=order.order_id, orderRef=ref, tif="DAY",
                 )
                 self.ib.placeOrder(contract, resend)
                 self.ledger.mark_sent(ref)

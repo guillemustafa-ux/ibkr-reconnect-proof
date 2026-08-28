@@ -137,17 +137,67 @@ the `placeOrder` frame. It then reconnects **directly** to the gateway,
 runs recovery, prints the verdict, verifies exactly one order exists,
 reconciles, and cancels its own order — leaving the account flat.
 
+Real output of both drills, run 2026-08-27 against IBKR's paper
+infrastructure (IB Gateway 10.45 stable, paper account `DUT...`):
+
 ```text
-[drill] ledger reserved order_ref=rcp-... BEFORE the socket write
-[chaos] placeOrder id=... forwarded; cutting the wire before the ack returns
+$ python scripts/live_drill.py --fault after
+[drill] connecting via chaos proxy 127.0.0.1:63113 -> 127.0.0.1:4002
+[drill] placing BUY 1 AAPL LMT 100.0 with fault 'after' armed
+[drill] ledger reserved order_ref=rcp-f84504650ff3 BEFORE the socket write
+[chaos] placeOrder id=18 forwarded; cutting the wire before the ack returns
 [drill] connection lost; ledger state: SENT (fate unknown)
+[drill] outage in progress; waiting 5s before reconnecting...
 [drill] reconnecting DIRECTLY to the gateway...
-[drill] recovery report: adopted=['rcp-...'] resent=[] filled=[] missing=[]
+[drill] recovery report: adopted=['rcp-f84504650ff3'] resent=[] filled=[] missing=[]
 [drill] open orders at gateway with our ref: 1 (must be exactly 1 — no duplicate, no loss)
 [drill] reconciliation: clean=True divergences=[]
-[drill] cleanup: cancelling orderId=...
+[drill] cleanup: cancelling orderId=18
 [drill] done — account left flat
 ```
+
+The broker had the order all along — the ack just never made it back.
+Recovery proved it alive and **adopted** it instead of resending.
+
+```text
+$ python scripts/live_drill.py --fault before
+[drill] connecting via chaos proxy 127.0.0.1:63120 -> 127.0.0.1:4002
+[drill] placing BUY 1 AAPL LMT 100.0 with fault 'before' armed
+[drill] ledger reserved order_ref=rcp-0bfd934dc884 BEFORE the socket write
+[chaos] placeOrder id=21 DROPPED before reaching the gateway; cutting the wire
+[drill] connection lost; ledger state: SENT (fate unknown)
+[drill] outage in progress; waiting 5s before reconnecting...
+[drill] reconnecting DIRECTLY to the gateway...
+[drill] recovery report: adopted=[] resent=['rcp-0bfd934dc884'] filled=[] missing=[]
+[drill] open orders at gateway with our ref: 1 (must be exactly 1 — no duplicate, no loss)
+[drill] reconciliation: clean=True divergences=[]
+[drill] cleanup: cancelling orderId=21
+[drill] done — account left flat
+```
+
+The broker never saw this one — recovery proved it absent and **resent**
+it under the same order id and ref. Same client code, opposite verdicts,
+one order at the gateway either way.
+
+### Field notes from the real gateway
+
+Three behaviors the fake broker does not model, found and handled while
+running the drill against the real thing:
+
+* **The dead session's clientId lingers.** After the cut, the gateway can
+  keep the old session registered for a few seconds and reject the
+  reconnect with error 326. The drill retries until the id is released.
+* **Instant reconnection races the order.** Reconnecting within
+  milliseconds of the cut can hit a window where the gateway purges the
+  not-yet-acked order while its orderId stays consumed; the same-id resend
+  is then rejected with error 103. Even in that worst case the safety
+  property held — the rejection *is* the duplicate protection, the ledger
+  recorded the fate, and no order was ever doubled. The drill now lets the
+  outage last a realistic 5 seconds, which is the scenario under proof.
+* **TIF must be explicit.** When the gateway fills the time-in-force from
+  an order preset it emits notice 10349, which `ib_async` does not know as
+  a warning: it mislabels the live trade as locally cancelled. Orders are
+  sent with `tif="DAY"` so the notice never fires.
 
 The proxy also runs standalone if you want to point your own client
 through it:
